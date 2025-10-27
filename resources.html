@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Resource Repository — USYD Theme</title>
+  <style>
+    :root {
+      --usydred: rgb(230,70,38);
+      --usydcharcoal: rgb(66,66,66);
+      --usydblack: rgb(10,10,10);
+      --usydblue: rgb(1,72,164);
+      --usydgrey: rgb(241,241,241);
+      --usydwhite: rgb(255,255,255);
+      --usydyellow: rgb(255,184,0);
+    }
+
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--usydgrey);color:var(--usydblack);font:16px/1.5 system-ui,Segoe UI,Roboto,Ubuntu}
+    .wrap{max-width:1000px;margin:0 auto;padding:28px 16px 80px}
+    h1{margin:0 0 12px;font-size:clamp(22px,3vw,30px);color:var(--usydred)}
+
+    .searchbox{display:flex;flex-wrap:wrap;gap:6px;align-items:center;background:var(--usydwhite);border:2px solid var(--usydcharcoal);border-radius:14px;padding:8px 10px}
+    .chips{display:flex;gap:6px;flex-wrap:wrap}
+    .chip{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--usydcharcoal);border-radius:999px;padding:6px 10px;font-size:12px;background:var(--usydyellow);color:var(--usydblack)}
+    .chip .x{cursor:pointer;opacity:.8}
+    .chip .x:hover{opacity:1}
+    .term{flex:1 1 180px;min-width:120px;border:0;outline:0;background:transparent;color:var(--usydblack);padding:4px}
+    .term::placeholder{color:var(--usydcharcoal)}
+    .clear-btn{border:none;background:transparent;color:var(--usydred);cursor:pointer;font-size:14px;padding:4px 6px}
+    .clear-btn:hover{color:var(--usydblue)}
+
+    .tag-bar{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+    .tag{font-size:12px;border:1px solid var(--usydcharcoal);color:var(--usydwhite);padding:4px 10px;border-radius:999px;cursor:pointer;background:var(--usydblue)}
+    .tag:hover{background:var(--usydred);color:var(--usydwhite)}
+
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-top:18px}
+    .card{background:var(--usydwhite);border:2px solid var(--usydcharcoal);border-radius:16px;padding:12px;display:flex;flex-direction:column;gap:8px}
+    .card h3{margin:0;font-size:18px;color:var(--usydblue)}
+    .card p{margin:0;color:var(--usydcharcoal);font-size:14px}
+    .tags{display:flex;gap:6px;flex-wrap:wrap}
+    .row{display:flex;gap:8px;flex-wrap:wrap}
+    .btn{display:inline-block;border:1px solid var(--usydcharcoal);border-radius:12px;padding:8px 10px;color:var(--usydwhite);background:var(--usydblue);text-decoration:none;cursor:pointer}
+    .btn:hover{background:var(--usydred)}
+    .empty{border:2px dashed var(--usydcharcoal);border-radius:16px;padding:22px;text-align:center;color:var(--usydcharcoal)}
+    .count{margin-top:10px;color:var(--usydcharcoal);font-size:14px}
+
+    dialog{border:2px solid var(--usydcharcoal);border-radius:16px;background:var(--usydwhite);color:var(--usydblack);padding:18px;width:min(640px,95vw)}
+    dialog::backdrop{background:rgba(0,0,0,.55)}
+    .subtle{color:var(--usydcharcoal);font-size:13px;margin-top:10px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Math & Physics Resource Repository</h1>
+
+    <div class="searchbox" id="searchbox">
+      <div class="chips" id="chips"></div>
+      <input id="qTerm" class="term" placeholder="Type to search by name… (click tags to add)" autocomplete="off" />
+      <button id="clearBtn" class="clear-btn" title="Clear search">✕</button>
+    </div>
+    <div id="tagBar" class="tag-bar"></div>
+
+    <div id="results" class="grid" aria-live="polite"></div>
+    <div id="count" class="count"></div>
+  </div>
+
+  <dialog id="details">
+    <h2 id="dTitle"></h2>
+    <p id="dDesc"></p>
+    <div class="subtle">Links</div>
+    <div id="dLinks" class="row"></div>
+    <div id="dPrereqs" class="subtle"></div>
+    <div style="margin-top:12px;text-align:right"><button class="btn" id="closeDetails">Close</button></div>
+  </dialog>
+
+  <script>
+    const CSV_PATH = './resources.csv';
+
+    const CSV_TEMPLATE = `title,url,tags,desc,links,prereqTags,prereqItems\n`
+      + `3Blue1Brown — Essence of Calculus,https://www.3blue1brown.com/topics/calculus,"calculus; derivatives; integrals; visual","Intuitive calculus series with animations","Series Home|https://www.3blue1brown.com/topics/calculus","functions; algebra",\n`
+      + `Paul's Online Math Notes — Trigonometry,https://tutorial.math.lamar.edu/Classes/Alg/TrigFunctions.aspx,"trigonometry; identities; precalculus","Definitions, graphs, identities, and practice.","Main|https://tutorial.math.lamar.edu/","algebra",\n`
+      + `Khan Academy — Linear Algebra,https://www.khanacademy.org/math/linear-algebra,"linear algebra; vectors; matrices","Vectors, matrices, transformations with practice.","Course|https://www.khanacademy.org/math/linear-algebra","algebra",\n`;
+
+    let DATA = [];
+    const selectedTags = new Set();
+
+    const qTerm = document.getElementById('qTerm');
+    const chipsEl = document.getElementById('chips');
+    const tagBar = document.getElementById('tagBar');
+    const results = document.getElementById('results');
+    const countEl = document.getElementById('count');
+    const dlg = document.getElementById('details');
+    const dTitle = document.getElementById('dTitle');
+    const dDesc = document.getElementById('dDesc');
+    const dLinks = document.getElementById('dLinks');
+    const dPrereqs = document.getElementById('dPrereqs');
+
+    document.getElementById('closeDetails').addEventListener('click', ()=> dlg.close());
+
+    function parseCSV(text){
+      const rows = text.trim().split(/\n/).map(r => r.split(/,(?=(?:[^"]*\"[^"]*\")*[^"]*$)/).map(c => c.replace(/^\"|\"$/g, '').trim()));
+      return rows;
+    }
+
+    function rowsToData(rows){
+      if (!rows.length) return [];
+      const header = rows[0].map(h => h.toLowerCase());
+      return rows.slice(1).map(r => {
+        const get = name => r[header.indexOf(name)] || '';
+        const split = s => s.split(/[;,]/).map(x => x.trim()).filter(Boolean);
+        const links = split(get('links')).map(pair => {
+          const [label, url] = pair.split('|').map(x => x.trim());
+          return url ? { label: label || 'Link', url } : null;
+        }).filter(Boolean);
+        return {
+          title: get('title'),
+          url: get('url'),
+          tags: split(get('tags')),
+          desc: get('desc'),
+          links,
+          prereqTags: split(get('prereqtags')),
+          prereqItems: split(get('prereqitems'))
+        };
+      }).filter(x => x.title);
+    }
+
+    async function loadCsv(){
+      try {
+        const res = await fetch(CSV_PATH);
+        const text = await res.text();
+        DATA = rowsToData(parseCSV(text));
+        renderTagBar(); render();
+      } catch {
+        DATA = rowsToData(parseCSV(CSV_TEMPLATE));
+        renderTagBar(); render();
+      }
+    }
+
+    const norm = s => s.toLowerCase();
+
+    function matchItem(item){
+      const q = norm(qTerm.value).trim();
+      const itemTags = new Set(item.tags.map(norm));
+      const tagsOk = Array.from(selectedTags).every(t => itemTags.has(t));
+      const textOk = !q || norm(item.title).includes(q) || item.tags.some(t => norm(t).includes(q));
+      return tagsOk && textOk;
+    }
+
+    function renderChips(){
+      chipsEl.innerHTML = '';
+      selectedTags.forEach(tag => {
+        const chip = document.createElement('span');
+        chip.className = 'chip';
+        chip.innerHTML = `<span>#${tag}</span><span class="x" title="Remove">✕</span>`;
+        chip.querySelector('.x').addEventListener('click', ()=>{ selectedTags.delete(tag); renderChips(); render(); });
+        chipsEl.appendChild(chip);
+      });
+    }
+
+    function addTag(tag){ selectedTags.add(norm(tag)); renderChips(); render(); }
+
+    function renderTagBar(){
+      const allTags = Array.from(new Set(DATA.flatMap(x => x.tags))).sort();
+      tagBar.innerHTML = '';
+      allTags.forEach(tag => {
+        const el = document.createElement('span');
+        el.className = 'tag'; el.textContent = tag;
+        el.addEventListener('click', ()=>{ addTag(tag); qTerm.focus(); });
+        tagBar.appendChild(el);
+      });
+    }
+
+    function render(){
+      const list = DATA.filter(matchItem);
+      results.innerHTML = '';
+      if (!list.length){
+        const div = document.createElement('div');
+        div.className = 'empty'; div.textContent = 'No matching resources.';
+        results.appendChild(div);
+        countEl.textContent = '0 results';
+        return;
+      }
+      list.forEach(it => {
+        const card = document.createElement('article');
+        card.className = 'card';
+        card.innerHTML = `<h3>${it.title}</h3><p>${it.desc}</p>`;
+        const tagDiv = document.createElement('div'); tagDiv.className = 'tags';
+        it.tags.forEach(t => {
+          const span = document.createElement('span'); span.className='tag'; span.textContent=t; span.addEventListener('click', ()=> addTag(t)); tagDiv.appendChild(span);
+        });
+        card.appendChild(tagDiv);
+        const row = document.createElement('div'); row.className = 'row';
+        const open = document.createElement('a'); open.className='btn'; open.href=it.url; open.target='_blank'; open.textContent='Open ↗';
+        const det = document.createElement('button'); det.className='btn'; det.textContent='Details'; det.addEventListener('click', ()=> showDetails(it));
+        row.append(open, det); card.appendChild(row);
+        results.appendChild(card);
+      });
+      countEl.textContent = `${list.length} result${list.length===1?'':'s'}`;
+    }
+
+    function showDetails(item){
+      dTitle.textContent = item.title;
+      dDesc.textContent = item.desc;
+      dLinks.innerHTML = '';
+      item.links.forEach(l=>{
+        const a=document.createElement('a'); a.className='btn'; a.href=l.url; a.target='_blank'; a.textContent=l.label+' ↗'; dLinks.appendChild(a);
+      });
+      dPrereqs.innerHTML = item.prereqTags.length ? `Assumed knowledge: ${item.prereqTags.join(', ')}` : '';
+      dlg.showModal();
+    }
+
+    document.getElementById('clearBtn').addEventListener('click', ()=>{ qTerm.value=''; selectedTags.clear(); renderChips(); render(); });
+    qTerm.addEventListener('input', render);
+
+    loadCsv();
+  </script>
+</body>
+</html>
